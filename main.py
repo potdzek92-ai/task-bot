@@ -5,7 +5,6 @@ from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from datetime import datetime, timedelta
 import sqlite3
-import schedule
 import time
 import threading
 
