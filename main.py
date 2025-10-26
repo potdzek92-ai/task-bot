@@ -11,7 +11,7 @@ import threading
 
 # Настройки для Render
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))  # Исправлено: значение по умолчанию
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 PORT = int(os.environ.get('PORT', 8443))
 
 # Настройка логирования
@@ -174,30 +174,24 @@ async def list_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(message)
 
 # Ежедневная отправка
-async def send_daily_tasks():
+async def send_daily_tasks(app):
     try:
-        application = Application.builder().token(BOT_TOKEN).build()
         tasks = get_tasks_for_date(datetime.now())
-        await application.bot.send_message(chat_id=ADMIN_ID, text=tasks)
+        await app.bot.send_message(chat_id=ADMIN_ID, text=tasks)
         logger.info("✅ Ежедневные задачи отправлены")
     except Exception as e:
         logger.error(f"❌ Ошибка отправки: {e}")
 
 # Планировщик
-def scheduler():
-    # Получаем время отправки из БД
-    conn = sqlite3.connect('tasks.db')
-    c = conn.cursor()
-    c.execute("SELECT value FROM settings WHERE key = 'send_time'")
-    result = c.fetchone()
-    send_time = result[0] if result else "17:45"
-    conn.close()
-    
-    schedule.every().day.at(send_time).do(lambda: asyncio.run(send_daily_tasks()))
-    
+async def scheduler(app):
     while True:
-        schedule.run_pending()
-        time.sleep(60)
+        now = datetime.now()
+        # Проверяем каждый час, не время ли отправлять задачи
+        if now.hour == 17 and now.minute == 45:
+            await send_daily_tasks(app)
+        
+        # Ждем 1 минуту до следующей проверки
+        await asyncio.sleep(60)
 
 # Тестовая команда
 async def test_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -205,11 +199,11 @@ async def test_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔ Доступ запрещен")
         return
         
-    await send_daily_tasks()
+    await send_daily_tasks(context.application)
     await update.message.reply_text("✅ Тестовое сообщение отправлено")
 
 # Запуск бота
-def main():
+async def main():
     # Проверка обязательных переменных
     if not BOT_TOKEN:
         logger.error("❌ BOT_TOKEN не установлен")
@@ -233,15 +227,13 @@ def main():
     application.add_handler(CommandHandler("test", test_send))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    # Запускаем планировщик в отдельном потоке
-    thread = threading.Thread(target=scheduler)
-    thread.daemon = True
-    thread.start()
+    # Запускаем планировщик как асинхронную задачу
+    asyncio.create_task(scheduler(application))
     
     # Для Render используем webhook
     if 'RENDER' in os.environ:
         webhook_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/{BOT_TOKEN}"
-        application.run_webhook(
+        await application.run_webhook(
             listen="0.0.0.0",
             port=PORT,
             url_path=BOT_TOKEN,
@@ -250,8 +242,7 @@ def main():
     else:
         # Локально используем polling
         logger.info("🚀 Бот запущен (polling)!")
-        application.run_polling()
+        await application.run_polling()
 
 if __name__ == "__main__":
-    main()
-
+    asyncio.run(main())
